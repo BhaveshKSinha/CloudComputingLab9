@@ -1,0 +1,171 @@
+name: OpenFaaS CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/pipeline.yml
+      - function/**
+      - terraform/**
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Choose whether to deploy or destroy the OpenFaaS function
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - destroy
+
+env:
+  FUNCTION_IMAGE: ${{ secrets.DOCKER_USERNAME }}/hello-world:latest
+  GATEWAY_URL: http://127.0.0.1:8080
+
+jobs:
+  build_and_push:
+    if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install OpenFaaS CLI
+        run: curl -sSL https://cli.openfaas.com | sudo sh
+
+      - name: Pull OpenFaaS template
+        run: faas-cli template store pull python3-http
+
+      - name: Render stack file
+        run: |
+          sed "s|__FUNCTION_IMAGE__|${FUNCTION_IMAGE}|g" function/hello-world.yml > function/hello-world.rendered.yml
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push function image
+        run: |
+          faas-cli build -f function/hello-world.rendered.yml
+          faas-cli push -f function/hello-world.rendered.yml
+
+  deploy:
+    if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
+    runs-on: self-hosted
+    needs: build_and_push
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Verify runner prerequisites
+        run: |
+          if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
+            throw "kubectl must be installed on the self-hosted runner."
+          }
+
+          if (-not (Get-Command faas-cli -ErrorAction SilentlyContinue)) {
+            throw "faas-cli must be installed on the self-hosted runner."
+          }
+
+          terraform version
+          kubectl version --client
+          faas-cli version
+
+      - name: Start gateway port-forward if needed
+        run: |
+          $connection = Test-NetConnection -ComputerName 127.0.0.1 -Port 8080 -WarningAction SilentlyContinue
+
+          if (-not $connection.TcpTestSucceeded) {
+            $process = Start-Process kubectl -ArgumentList 'port-forward','svc/gateway','-n','openfaas','8080:8080' -PassThru -WindowStyle Hidden
+            Start-Sleep -Seconds 5
+            "PORT_FORWARD_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Login to OpenFaaS
+        run: faas-cli login --username admin --password "${{ secrets.OPENFAAS_PASSWORD }}" --gateway $env:GATEWAY_URL
+
+      - name: Terraform init
+        run: terraform -chdir=terraform init
+
+      - name: Terraform apply
+        env:
+          TF_VAR_function_image: ${{ secrets.DOCKER_USERNAME }}/hello-world:latest
+          TF_VAR_release_id: ${{ github.sha }}
+          TF_VAR_gateway_url: http://127.0.0.1:8080
+        run: terraform -chdir=terraform apply -auto-approve
+
+      - name: Stop gateway port-forward
+        if: always()
+        run: |
+          if ($env:PORT_FORWARD_PID) {
+            Stop-Process -Id ([int]$env:PORT_FORWARD_PID)
+          }
+
+  destroy:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    runs-on: self-hosted
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Verify runner prerequisites
+        run: |
+          if (-not (Get-Command kubectl -ErrorAction SilentlyContinue)) {
+            throw "kubectl must be installed on the self-hosted runner."
+          }
+
+          if (-not (Get-Command faas-cli -ErrorAction SilentlyContinue)) {
+            throw "faas-cli must be installed on the self-hosted runner."
+          }
+
+          terraform version
+          kubectl version --client
+          faas-cli version
+
+      - name: Start gateway port-forward if needed
+        run: |
+          $connection = Test-NetConnection -ComputerName 127.0.0.1 -Port 8080 -WarningAction SilentlyContinue
+
+          if (-not $connection.TcpTestSucceeded) {
+            $process = Start-Process kubectl -ArgumentList 'port-forward','svc/gateway','-n','openfaas','8080:8080' -PassThru -WindowStyle Hidden
+            Start-Sleep -Seconds 5
+            "PORT_FORWARD_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Login to OpenFaaS
+        run: faas-cli login --username admin --password "${{ secrets.OPENFAAS_PASSWORD }}" --gateway $env:GATEWAY_URL
+
+      - name: Terraform init
+        run: terraform -chdir=terraform init
+
+      - name: Terraform destroy
+        env:
+          TF_VAR_gateway_url: http://127.0.0.1:8080
+        run: terraform -chdir=terraform destroy -auto-approve
+
+      - name: Stop gateway port-forward
+        if: always()
+        run: |
+          if ($env:PORT_FORWARD_PID) {
+            Stop-Process -Id ([int]$env:PORT_FORWARD_PID)
+          }
