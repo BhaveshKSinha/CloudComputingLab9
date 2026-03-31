@@ -20,6 +20,7 @@ on:
           - destroy
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   FUNCTION_IMAGE: ${{ secrets.DOCKER_USERNAME }}/hello-world:latest
   GATEWAY_URL: http://127.0.0.1:8080
 
@@ -30,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install OpenFaaS CLI
         run: curl -sSL https://cli.openfaas.com | sudo sh
@@ -60,14 +61,11 @@ jobs:
 
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: actions/checkout@v5
 
       - name: Verify runner prerequisites
         run: |
@@ -77,6 +75,10 @@ jobs:
 
           if (-not (Get-Command faas-cli -ErrorAction SilentlyContinue)) {
             throw "faas-cli must be installed on the self-hosted runner."
+          }
+
+          if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
+            throw "terraform must already be installed on the self-hosted runner."
           }
 
           terraform version
@@ -119,14 +121,11 @@ jobs:
 
     defaults:
       run:
-        shell: pwsh
+        shell: powershell
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: actions/checkout@v5
 
       - name: Verify runner prerequisites
         run: |
@@ -136,6 +135,10 @@ jobs:
 
           if (-not (Get-Command faas-cli -ErrorAction SilentlyContinue)) {
             throw "faas-cli must be installed on the self-hosted runner."
+          }
+
+          if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
+            throw "terraform must already be installed on the self-hosted runner."
           }
 
           terraform version
