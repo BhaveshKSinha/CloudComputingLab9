@@ -20,7 +20,7 @@ resource "null_resource" "hello_world" {
   provisioner "local-exec" {
     working_dir = "${path.module}/.."
     interpreter = ["PowerShell", "-Command"]
-    command     = "(Get-Content function/hello-world.yml -Raw).Replace('__FUNCTION_IMAGE__', '${self.triggers.function_image}') | Set-Content function/hello-world.rendered.yml; faas-cli deploy -f function/hello-world.rendered.yml -g ${self.triggers.gateway_url}"
+    command     = "(Get-Content function/hello-world.yml -Raw).Replace('__FUNCTION_IMAGE__', '${self.triggers.function_image}') | Set-Content function/hello-world.rendered.yml; faas-cli template store pull python3-http; faas-cli deploy -f function/hello-world.rendered.yml -g ${self.triggers.gateway_url}"
   }
 
   provisioner "local-exec" {
