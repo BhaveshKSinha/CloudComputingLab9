@@ -85,34 +85,26 @@ jobs:
           kubectl version --client
           faas-cli version
 
-      - name: Start gateway port-forward if needed
-        run: |
-          $connection = Test-NetConnection -ComputerName 127.0.0.1 -Port 8080 -WarningAction SilentlyContinue
-
-          if (-not $connection.TcpTestSucceeded) {
-            $process = Start-Process kubectl -ArgumentList 'port-forward','svc/gateway','-n','openfaas','8080:8080' -PassThru -WindowStyle Hidden
-            Start-Sleep -Seconds 5
-            "PORT_FORWARD_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-
-      - name: Login to OpenFaaS
-        run: faas-cli login --username admin --password "${{ secrets.OPENFAAS_PASSWORD }}" --gateway $env:GATEWAY_URL
-
-      - name: Terraform init
-        run: terraform -chdir=terraform init
-
-      - name: Terraform apply
+      - name: Deploy through Terraform
         env:
           TF_VAR_function_image: ${{ secrets.DOCKER_USERNAME }}/hello-world:latest
           TF_VAR_release_id: ${{ github.sha }}
           TF_VAR_gateway_url: http://127.0.0.1:8080
-        run: terraform -chdir=terraform apply -auto-approve
-
-      - name: Stop gateway port-forward
-        if: always()
         run: |
-          if ($env:PORT_FORWARD_PID) {
-            Stop-Process -Id ([int]$env:PORT_FORWARD_PID)
+          $portForward = $null
+
+          try {
+            $portForward = Start-Process kubectl -ArgumentList 'port-forward','svc/gateway','-n','openfaas','8080:8080' -PassThru -WindowStyle Hidden
+            Start-Sleep -Seconds 8
+
+            faas-cli login --username admin --password "${{ secrets.OPENFAAS_PASSWORD }}" --gateway $env:GATEWAY_URL
+            terraform -chdir=terraform init
+            terraform -chdir=terraform apply -auto-approve
+          }
+          finally {
+            if ($portForward -and -not $portForward.HasExited) {
+              Stop-Process -Id $portForward.Id
+            }
           }
 
   destroy:
@@ -145,30 +137,22 @@ jobs:
           kubectl version --client
           faas-cli version
 
-      - name: Start gateway port-forward if needed
-        run: |
-          $connection = Test-NetConnection -ComputerName 127.0.0.1 -Port 8080 -WarningAction SilentlyContinue
-
-          if (-not $connection.TcpTestSucceeded) {
-            $process = Start-Process kubectl -ArgumentList 'port-forward','svc/gateway','-n','openfaas','8080:8080' -PassThru -WindowStyle Hidden
-            Start-Sleep -Seconds 5
-            "PORT_FORWARD_PID=$($process.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          }
-
-      - name: Login to OpenFaaS
-        run: faas-cli login --username admin --password "${{ secrets.OPENFAAS_PASSWORD }}" --gateway $env:GATEWAY_URL
-
-      - name: Terraform init
-        run: terraform -chdir=terraform init
-
-      - name: Terraform destroy
+      - name: Destroy through Terraform
         env:
           TF_VAR_gateway_url: http://127.0.0.1:8080
-        run: terraform -chdir=terraform destroy -auto-approve
-
-      - name: Stop gateway port-forward
-        if: always()
         run: |
-          if ($env:PORT_FORWARD_PID) {
-            Stop-Process -Id ([int]$env:PORT_FORWARD_PID)
+          $portForward = $null
+
+          try {
+            $portForward = Start-Process kubectl -ArgumentList 'port-forward','svc/gateway','-n','openfaas','8080:8080' -PassThru -WindowStyle Hidden
+            Start-Sleep -Seconds 8
+
+            faas-cli login --username admin --password "${{ secrets.OPENFAAS_PASSWORD }}" --gateway $env:GATEWAY_URL
+            terraform -chdir=terraform init
+            terraform -chdir=terraform destroy -auto-approve
+          }
+          finally {
+            if ($portForward -and -not $portForward.HasExited) {
+              Stop-Process -Id $portForward.Id
+            }
           }
